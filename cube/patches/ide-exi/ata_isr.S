@@ -1,5 +1,5 @@
 /* 
- * Copyright (c) 2020-2021, Extrems <extrems@extremscorner.org>
+ * Copyright (c) 2021, Extrems <extrems@extremscorner.org>
  * 
  * This file is part of Swiss.
  * 
@@ -41,52 +41,33 @@ external_interrupt_vector:
 	and.	r6, r5, r6
 	lwz		r6, isr_transferred - 0x80000000 (r0)
 	cmpwi	cr7, r6, 512
-	cmpwi	cr6, r6, 0
-	beq		5f
-	bnl		cr7, 5f
-	andi.	r5, r5, (0x3FFF & ~0x80A) | (1 << 3)
-	ecowx	r5, r0, r4
+	beq		1f
+	bnl		cr7, 1f
 	li		r5, 4*4
 	eciwx	r5, r5, r4
-	blt		cr6, 3f
 	stw		r5, VAR_SECTOR_BUF (r6)
 	addi	r6, r6, 4
-1:	cmpwi	cr7, r6, 512
 	stw		r6, isr_transferred - 0x80000000 (r0)
-	li		r5, 4*4
-	li		r6, ~0
-	ecowx	r6, r5, r4
-	bnl		cr7, 2f
+	eciwx	r5, r0, r4
+	andi.	r6, r5, 0x405
+	ecowx	r6, r0, r4
+	andi.	r5, r5, (0x3FFF & ~0x80A) | (1 << 3)
+	ecowx	r5, r0, r4
 	li		r5, 3*4
 	li		r6, ((4 - 1) << 4) | 0b01
 	ecowx	r6, r5, r4
-	b		4f
-2:	li		r5, 3*4
-	li		r6, ((2 - 1) << 4) | 0b01
-	ecowx	r6, r5, r4
-	b		4f
-3:	srwi	r5, r5, 24
-	cmplwi	r5, 0xFE
-	li		r6, 0
-	beq		1b
-	li		r5, 4*4
-	li		r6, ~0
-	ecowx	r6, r5, r4
-	li		r5, 3*4
-	li		r6, ((1 - 1) << 4) | 0b01
-	ecowx	r6, r5, r4
-4:	lis		r4, 0x0C00
+	lis		r4, 0x0C00
 	li		r5, 0x3000
 	eciwx	r5, r5, r4
 	rlwinm.	r6, r5, 0, 16, 14
-	bne		5f
+	bne		1f
 	mfsprg	r6, 3
 	mtcr	r6
 	mfsprg	r6, 2
 	mfsprg	r5, 1
 	mfsprg	r4, 0
 	rfi
-5:	mfsprg	r6, 3
+1:	mfsprg	r6, 3
 	mtcr	r6
 	mfsprg	r6, 2
 	mfsprg	r5, 1

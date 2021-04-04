@@ -43,6 +43,16 @@ typedef volatile f64 vf64;
 	asm volatile ("mtmsr %0" :: "r" (msr)); \
 })
 
+#define enable_interrupts_idle() ({ \
+	unsigned long msr; \
+	asm volatile ("mfmsr %0" : "=r" (msr)); \
+	asm volatile ("ori %0,%0,0x8000" : "+r" (msr)); \
+	asm volatile ("oris %0,%0,0x0004" : "+r" (msr)); \
+	asm volatile ("sync"); \
+	asm volatile ("mtmsr %0" :: "r" (msr)); \
+	asm volatile ("isync"); \
+})
+
 extern volatile u16 PE[24];
 extern volatile u32 PI[13];
 extern volatile u16 MI[46];

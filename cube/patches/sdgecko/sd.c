@@ -26,6 +26,9 @@
 #ifndef QUEUE_SIZE
 #define QUEUE_SIZE			2
 #endif
+#ifndef READ_MULTIPLE
+#define READ_MULTIPLE		0
+#endif
 #define SECTOR_SIZE 		512
 
 #define sectorBuf			((u8*)VAR_SECTOR_BUF)
@@ -93,7 +96,7 @@ static void exi_imm_write(u32 data, int len, int sync)
 
 static u32 exi_imm_read(int len, int sync)
 {
-	exi_regs[4] = -1;
+	exi_regs[4] = ~0;
 	// Tell EXI if this is a read or a write
 	exi_regs[3] = ((len - 1) << 4) | (EXI_READ << 2) | 1;
 
@@ -171,7 +174,7 @@ static void rcvr_datablock(void *dest, u32 start_byte, u32 bytes_to_read, int sy
 		exi_imm_read(1, 0);
 
 		isr_registers = OSUncachedToPhysical(exi_regs);
-		isr_transferred = 0xFEFFFFFF;
+		isr_transferred = -1;
 
 		OSInterrupt interrupt = OS_INTERRUPT_EXI_0_TC + (3 * exi_channel);
 		TCIntrruptHandler = OSSetInterruptHandler(interrupt, tc_interrupt_handler);
@@ -199,46 +202,6 @@ static int xmit_datablock(void *src, u32 token) {
 	return (res & 0x1F) == 0x05;
 }
 
-#ifndef SINGLE_SECTOR
-int do_read(void *dst, u32 len, u32 offset, u32 sectorLba) {
-	u32 lba = (offset>>9) + sectorLba;
-	u32 startByte = (offset%SECTOR_SIZE);
-	u32 numBytes = len;
-	u8 lbaShift = *(u8*)VAR_SD_SHIFT;
-	
-	// SDHC uses sector addressing, SD uses byte
-	lba <<= lbaShift;	
-	// Send multiple block read command and the LBA we want to start reading at
-	send_cmd(CMD18, lba);
-	
-	// Read block crossing a boundary
-	if(startByte) {
-		// amount to read in first block may vary if our read is small enough to fit in it
-		u32 amountInBlock = (len + startByte > SECTOR_SIZE) ? SECTOR_SIZE-startByte : len;
-		rcvr_datablock(dst,startByte, amountInBlock, 1);
-		numBytes-=amountInBlock;
-		dst+=amountInBlock;
-	}
-	
-	// Read any full, aligned blocks
-	u32 numFullBlocks = numBytes>>9; 
-	numBytes -= numFullBlocks << 9;
-	while(numFullBlocks) {
-		rcvr_datablock(dst, 0,SECTOR_SIZE, 1);
-		dst+=SECTOR_SIZE; 
-		numFullBlocks--;
-	}
-	
-	// Read any trailing half block
-	if(numBytes) {
-		rcvr_datablock(dst,0, numBytes, 1);
-		dst+=numBytes;
-	}
-	// End the read by sending CMD12
-	send_cmd(CMD12, 0);
-	return len;
-}
-#else
 #if ISR_READ
 static void mmc_done_queued(void);
 static void mmc_read_queued(void)
@@ -317,7 +280,6 @@ void tc_interrupt_handler(OSInterrupt interrupt, OSContext *context)
 
 	OSMaskInterrupts(OS_INTERRUPTMASK(interrupt));
 	OSSetInterruptHandler(interrupt, TCIntrruptHandler);
-	exi_imm_read(2, 1);
 	exi_deselect();
 
 	mmc_done_queued();
@@ -357,7 +319,7 @@ int do_read_write(void *buf, u32 len, u32 offset, u32 sectorLba, bool write) {
 		return 0;
 	}
 	if(write) {
-		#if SINGLE_SECTOR == 2 || ISR_READ
+		#if ISR_READ || READ_MULTIPLE
 		if(mmc.last_sector == lba) {
 			mmc.last_sector = ~0;
 		}
@@ -371,7 +333,7 @@ int do_read_write(void *buf, u32 len, u32 offset, u32 sectorLba, bool write) {
 		}
 		return 0;
 	}
-	#if SINGLE_SECTOR < 2
+	#if !READ_MULTIPLE
 	end_read();
 	// Send single block read command and the LBA we want to read at
 	send_cmd(CMD17, lba << lbaShift);
@@ -406,10 +368,9 @@ int do_read_write(void *buf, u32 len, u32 offset, u32 sectorLba, bool write) {
 	#endif
 	return numBytes;
 }
-#endif
 
 void end_read() {
-	#if SINGLE_SECTOR == 2 || ISR_READ
+	#if ISR_READ || READ_MULTIPLE
 	if(mmc.next_sector != ~0) {
 		mmc.next_sector = ~0;
 
